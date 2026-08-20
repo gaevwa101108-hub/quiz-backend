@@ -1,5 +1,6 @@
 import os
 import json
+from typing import List
 from fastapi import FastAPI, UploadFile, File, HTTPException, Body
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -38,64 +39,68 @@ def save_sync_data(data):
         print("Error writing sync data:", e)
 
 PROMPT = """
-You are an expert educational flashcard creator.
-Analyze the provided document/image thoroughly.
+You are an expert pedagogical AI educator.
+Your task is to analyze the provided page image(s) or document file(s) as a single, continuous educational lesson.
 
-STRICT INSTRUCTIONS:
-1. Extract and convert AT LEAST 90% of all information into multiple-choice quiz questions.
-2. AGE-APPROPRIATE QUESTION LENGTH:
-   - For early childhood (K1-G3): Keep question text VERY SHORT, punchy, and simple to read out loud.
-   - For older grades (G4-G12, C1-C4): Provide complete, accurate academic questions.
-3. VISUALS & DIAGRAMS:
-   - Create clean, valid standalone inline SVG code in the "svg" field whenever visual aid helps. If not needed, set "svg": "".
+STUDY & COMPREHENSION MANDATE:
+1. First, study the entire material holistically. If multiple pages are provided, connect continuous thoughts, rules, or sentences that cross page boundaries.
+2. Extract and transform AT LEAST 95% of all information—including body text, sidebars, diagrams, callout boxes, and itemized entries inside tables or charts—into comprehensive multiple-choice questions.
+3. Do not gloss over structured data (tables/lists). Treat every data row or conceptual pairing as an essential fact to be tested.
+4. Target Output Depth: For dense academic pages, generate 30 to 50 thorough, non-redundant questions that test both direct factual retrieval and conceptual application.
 
-Return ONLY a valid JSON array of objects with this schema:
+AGE-APPROPRIATE ADAPTATION:
+- Kindergarten to Grade 3 (K1-G3): Keep question text VERY SHORT, punchy, and clear for audio read-alouds.
+- Grades 4 to College (G4-C4): Provide complete, academically rigorous questions.
+
+VISUALS & DIAGRAMS:
+- Generate clean, standalone inline SVG code string in the "svg" field ONLY when visual assistance (geometry, grids, molecular structures, counting items) enhances comprehension. Otherwise, set "svg": "".
+
+Return ONLY a valid JSON array using this exact schema:
 [
   {
     "id": "Q1",
     "topic": "General",
-    "q": "Question text?",
+    "q": "Question text here?",
     "svg": "",
     "correct": "Correct Answer",
-    "options": ["Correct Answer", "Wrong 1", "Wrong 2", "Wrong 3"]
+    "options": ["Correct Answer", "Wrong Option 1", "Wrong Option 2", "Wrong Option 3"]
   }
 ]
 """
 
 @app.post("/api/scan")
-async def scan_document(file: UploadFile = File(...)):
+async def scan_documents(files: List[UploadFile] = File(...)):
     if not GEMINI_API_KEY:
         raise HTTPException(status_code=500, detail="GEMINI_API_KEY not configured on server.")
 
-    contents = await file.read()
+    contents_list = []
     
-    # Using strict JSON generation configuration
-    generation_config = {
-        "response_mime_type": "application/json"
-    }
-    model = genai.GenerativeModel('gemini-3.6-flash', generation_config=generation_config)
-
-    try:
-        if file.content_type.startswith("image/"):
-            image_part = {"mime_type": file.content_type, "data": contents}
-            response = model.generate_content([PROMPT, image_part])
-        elif file.content_type == "application/pdf":
+    # Process all uploaded files into Gemini parts
+    for file in files:
+        file_bytes = await file.read()
+        if file.content_type == "application/pdf":
             import io
-            pdf_reader = pypdf.PdfReader(io.BytesIO(contents))
+            pdf_reader = pypdf.PdfReader(io.BytesIO(file_bytes))
             pdf_text = ""
             for page in pdf_reader.pages:
                 pdf_text += page.extract_text() or ""
-            
-            combined_prompt = f"{PROMPT}\n\nPDF TEXT CONTENT:\n{pdf_text}"
-            response = model.generate_content(combined_prompt)
+            contents_list.append(f"\n--- PDF DOCUMENT PAGE ---\n{pdf_text}")
         else:
-            # Fallback for mobile upload content-types
-            image_part = {"mime_type": "image/jpeg", "data": contents}
-            response = model.generate_content([PROMPT, image_part])
+            # Handle image types (.jpg, .png, etc.)
+            mime = file.content_type if file.content_type.startswith("image/") else "image/jpeg"
+            contents_list.append({"mime_type": mime, "data": file_bytes})
+
+    generation_config = {
+        "response_mime_type": "application/json"
+    }
+    model = genai.GenerativeModel('gemini-2.5-flash', generation_config=generation_config)
+
+    try:
+        # Build prompt payload with all image/text parts
+        prompt_parts = [PROMPT] + contents_list
+        response = model.generate_content(prompt_parts)
 
         raw_text = response.text.strip()
-        
-        # Clean potential markdown wraps
         if raw_text.startswith("```json"): raw_text = raw_text[7:]
         if raw_text.startswith("```"): raw_text = raw_text[3:]
         if raw_text.endswith("```"): raw_text = raw_text[:-3]

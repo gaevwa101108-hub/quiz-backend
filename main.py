@@ -42,34 +42,24 @@ You are an expert educational flashcard creator.
 Analyze the provided document/image thoroughly.
 
 STRICT INSTRUCTIONS:
-1. Extract and convert AT LEAST 90% of all information and sentences into multiple-choice quiz questions.
+1. Extract and convert AT LEAST 90% of all information into multiple-choice quiz questions.
 2. AGE-APPROPRIATE QUESTION LENGTH:
-   - For early childhood and primary grades (K1, K2, G1, G2, G3): Keep question text VERY SHORT, punchy, engaging, and simple to read or listen to out loud (e.g., "Which shape is red?", "How many apples?", "What comes next?").
+   - For early childhood (K1-G3): Keep question text VERY SHORT, punchy, and simple to read out loud.
    - For older grades (G4-G12, C1-C4): Provide complete, accurate academic questions.
-3. PRIORITIZE:
-   - Highlighted text (yellow markers, annotations)
-   - Handwritten marginal notes or underlines
-   - Section headers, titles, dates, names, chemical formulas, and key definitions
-   - Cause-and-effect explanations
-4. VISUALS, DIAGRAMS & FORMULAS:
-   - Create clean, valid, standalone inline SVG code strings in the "svg" field whenever visual representation helps:
-     * K1 to G3: Simple counting icons, shapes, colored objects, or basic visual diagrams.
-     * Geometry/Math/Physics: Shapes, angles, force vectors, coordinate grids.
-     * Chemistry: Chemical bonds, molecular structures.
-   - If NO visual is needed, set "svg": "".
+3. VISUALS & DIAGRAMS:
+   - Create clean, valid standalone inline SVG code in the "svg" field whenever visual aid helps. If not needed, set "svg": "".
 
-Return ONLY a valid JSON array containing objects with this exact schema:
+Return ONLY a valid JSON array of objects with this schema:
 [
   {
     "id": "Q1",
     "topic": "General",
-    "q": "Very short question text here?",
+    "q": "Question text?",
     "svg": "",
     "correct": "Correct Answer",
-    "options": ["Correct Answer", "Wrong Option 1", "Wrong Option 2", "Wrong Option 3"]
+    "options": ["Correct Answer", "Wrong 1", "Wrong 2", "Wrong 3"]
   }
 ]
-Output raw JSON only. Do not wrap in markdown code blocks.
 """
 
 @app.post("/api/scan")
@@ -78,7 +68,12 @@ async def scan_document(file: UploadFile = File(...)):
         raise HTTPException(status_code=500, detail="GEMINI_API_KEY not configured on server.")
 
     contents = await file.read()
-    model = genai.GenerativeModel('gemini-1.5-flash')
+    
+    # Using strict JSON generation configuration
+    generation_config = {
+        "response_mime_type": "application/json"
+    }
+    model = genai.GenerativeModel('gemini-2.5-flash', generation_config=generation_config)
 
     try:
         if file.content_type.startswith("image/"):
@@ -94,9 +89,13 @@ async def scan_document(file: UploadFile = File(...)):
             combined_prompt = f"{PROMPT}\n\nPDF TEXT CONTENT:\n{pdf_text}"
             response = model.generate_content(combined_prompt)
         else:
-            raise HTTPException(status_code=400, detail="Unsupported file format.")
+            # Fallback for mobile upload content-types
+            image_part = {"mime_type": "image/jpeg", "data": contents}
+            response = model.generate_content([PROMPT, image_part])
 
         raw_text = response.text.strip()
+        
+        # Clean potential markdown wraps
         if raw_text.startswith("```json"): raw_text = raw_text[7:]
         if raw_text.startswith("```"): raw_text = raw_text[3:]
         if raw_text.endswith("```"): raw_text = raw_text[:-3]
@@ -105,6 +104,7 @@ async def scan_document(file: UploadFile = File(...)):
         return JSONResponse(content={"questions": questions})
 
     except Exception as e:
+        print("Backend Error:", str(e))
         raise HTTPException(status_code=500, detail=f"AI Processing Failed: {str(e)}")
 
 @app.post("/api/sync/upload")

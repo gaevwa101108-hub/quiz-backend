@@ -39,23 +39,30 @@ def save_sync_data(data):
         print("Error writing sync data:", e)
 
 PROMPT = """
-You are an expert pedagogical AI educator.
-Your task is to analyze the provided page image(s) or document file(s) as a single, continuous educational lesson.
+You are an exhaustive, line-by-line educational quiz generator.
+Your objective is 100% complete coverage of all provided document pages.
 
-STUDY & COMPREHENSION MANDATE:
-1. First, study the entire material holistically. If multiple pages are provided, connect continuous thoughts, rules, or sentences that cross page boundaries.
-2. Extract and transform AT LEAST 95% of all information—including body text, sidebars, diagrams, callout boxes, and itemized entries inside tables or charts—into comprehensive multiple-choice questions.
-3. Do not gloss over structured data (tables/lists). Treat every data row or conceptual pairing as an essential fact to be tested.
-4. Target Output Depth: For dense academic pages, generate 30 to 50 thorough, non-redundant questions that test both direct factual retrieval and conceptual application.
+STRICT GRANULAR GENERATION RULES:
+1. QUANTITY MANDATE: Generate AT LEAST 100 HIGH-QUALITY QUESTIONS PER PAGE scanned.
+   - 1 Page scanned = Minimum 100 questions.
+   - 2 Pages scanned = Minimum 200 questions.
+   - 3 Pages scanned = Minimum 300 questions.
+   - 4 Pages scanned = Minimum 400 questions.
 
-AGE-APPROPRIATE ADAPTATION:
-- Kindergarten to Grade 3 (K1-G3): Keep question text VERY SHORT, punchy, and clear for audio read-alouds.
-- Grades 4 to College (G4-C4): Provide complete, academically rigorous questions.
+2. ATOMIC EXTRACTION RULES:
+   - PARAGRAPHS & TEXT: Generate AT LEAST 1 multiple-choice question for EVERY SINGLE SENTENCE in the textbook text. Do not summarize or skip any sentence.
+   - TABLES & CHARTS: Generate AT LEAST 1 unique question for EVERY SINGLE CELL, entry, element, formula, or root name inside every table.
+   - DIAGRAMS & FIGURES: Generate AT LEAST 1 question for every labeled item, caption, arrow, and key concept in diagrams or callout boxes.
+   - DEFINITIONS & EXAMPLES: Convert every bold term, numerical example, or sample problem into a standalone question.
 
-VISUALS & DIAGRAMS:
-- Generate clean, standalone inline SVG code string in the "svg" field ONLY when visual assistance (geometry, grids, molecular structures, counting items) enhances comprehension. Otherwise, set "svg": "".
+AGE-APPROPRIATE STYLE:
+- Early childhood (K1-G3): Short, clear, simple text for read-alouds.
+- Grades 4 to College (G4-C4): Complete, precise academic questions.
 
-Return ONLY a valid JSON array using this exact schema:
+VISUALS:
+- Include inline SVG diagram strings in the "svg" field ONLY when visual assistance is required. Otherwise set "svg": "".
+
+Return ONLY a valid JSON array of objects using this exact schema:
 [
   {
     "id": "Q1",
@@ -75,7 +82,6 @@ async def scan_documents(files: List[UploadFile] = File(...)):
 
     contents_list = []
     
-    # Process all uploaded files into Gemini parts
     for file in files:
         file_bytes = await file.read()
         if file.content_type == "application/pdf":
@@ -84,19 +90,19 @@ async def scan_documents(files: List[UploadFile] = File(...)):
             pdf_text = ""
             for page in pdf_reader.pages:
                 pdf_text += page.extract_text() or ""
-            contents_list.append(f"\n--- PDF DOCUMENT PAGE ---\n{pdf_text}")
+            contents_list.append(f"\n--- PDF PAGE ---\n{pdf_text}")
         else:
-            # Handle image types (.jpg, .png, etc.)
             mime = file.content_type if file.content_type.startswith("image/") else "image/jpeg"
             contents_list.append({"mime_type": mime, "data": file_bytes})
 
+    # Output ceiling raised to 32,768 tokens for massive multi-page question generation
     generation_config = {
-        "response_mime_type": "application/json"
+        "response_mime_type": "application/json",
+        "max_output_tokens": 32768
     }
     model = genai.GenerativeModel('gemini-3.6-flash', generation_config=generation_config)
 
     try:
-        # Build prompt payload with all image/text parts
         prompt_parts = [PROMPT] + contents_list
         response = model.generate_content(prompt_parts)
 

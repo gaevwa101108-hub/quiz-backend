@@ -73,7 +73,7 @@ async def scan_document(file: UploadFile = File(...)):
     generation_config = {
         "response_mime_type": "application/json"
     }
-    model = genai.GenerativeModel('gemini-2.5-flash', generation_config=generation_config)
+    model = genai.GenerativeModel('gemini-3.6-flash', generation_config=generation_config)
 
     try:
         if file.content_type.startswith("image/"):
